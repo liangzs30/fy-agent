@@ -5,6 +5,7 @@ import time
 from functools import partial
 import traceback
 from entity.TestVo import Task, CaseLog, Param, WebElement, StopTask
+from np.kw.android.AndroidApp import AndroidApp
 from np.kw.api.http import HttpClient
 from np.kw.common.common import Common
 from np.kw.db.dboper import MysqlClient
@@ -16,8 +17,15 @@ from tools.http_client import HttpUtil
 from tools.log_util import calc_time, LogUtil
 
 driver = Browser()
+android_client = AndroidApp()
 db_class = MysqlClient()
-step_class = {'HttpClient': HttpClient(), 'Common': Common(), 'Browser': driver, 'MysqlClient': db_class}
+step_class = {
+    'HttpClient': HttpClient(),
+    'Common': Common(),
+    'Browser': driver,
+    'AndroidApp': android_client,
+    'MysqlClient': db_class
+}
 logger = LogUtil().logger
 http_util = HttpUtil()
 scheduler = BlockingScheduler()
@@ -30,41 +38,40 @@ def execute_step(**kwargs):
     loop_steps = kwargs['loop_steps']
     step_index = kwargs['step_index']
     log_text = kwargs['log_text']
-    if test_step['enabled']:
-        log_dict = {'stepName': test_step['kw']['name'],
-                    'stepDesc': test_step['desc'] if test_step.get('desc') else ''}
-        try:
-            module_name = test_step['kw']['className']
-            method_name = test_step['kw']['funcName']
-            mould = step_class[module_name]
-            method = getattr(mould, method_name)
-            kwargs = {}
-            if test_step['stepParam']:
-                kwargs['params'] = test_step['stepParam']
-            if test_step['stepResps'] != '[]':
-                kwargs['step_resps'] = test_step['stepResps']
-            log_dict['logDetail'], log_dict['cost_time'], log_dict['result'], log_dict[
-                'screen_shot'] = method(mould, **kwargs)
-            if test_step['kw']['name'] == 'if条件执行':
-                wont_run = log_dict['logDetail'][2]['content']['wont_run']
-                for s in wont_run:
-                    pass_steps.append(step_index + s + 1)
-            if test_step['kw']['name'] == 'for循环执行':
-                loop_params = json.loads(test_step['stepParam'])
-                loop_steps['time'] = int(loop_params['loop_time'])
-                l_index = int(loop_params['step_index'])
-                loop_steps['steps'] = test_steps[step_index + 1: l_index + 1]
-            case_result = log_dict['result']
-            log_text.append(log_dict)
-            return case_result, log_text, pass_steps, loop_steps
-        except Exception as e:
-            log_dict['logDetail'] = [{'title': '错误信息', 'time': f'{datetime.datetime.now()}',
-                                      'content': traceback.format_exc()}]
-            log_dict['result'] = 'error'
-            case_result = 'error'
-            log_text.append(log_dict)
-            logger.error("步骤执行异常: %s", e)
-            return case_result, log_text, pass_steps, loop_steps
+    log_dict = {'stepName': test_step['kw']['name'],
+                'stepDesc': test_step['desc'] if test_step.get('desc') else ''}
+    try:
+        module_name = test_step['kw']['className']
+        method_name = test_step['kw']['funcName']
+        mould = step_class[module_name]
+        method = getattr(mould, method_name)
+        kwargs = {}
+        if test_step['stepParam']:
+            kwargs['params'] = test_step['stepParam']
+        if test_step['stepResps'] != '[]':
+            kwargs['step_resps'] = test_step['stepResps']
+        log_dict['logDetail'], log_dict['cost_time'], log_dict['result'], log_dict[
+            'screen_shot'] = method(mould, **kwargs)
+        if test_step['kw']['name'] == 'if条件执行':
+            wont_run = log_dict['logDetail'][2]['content']['wont_run']
+            for s in wont_run:
+                pass_steps.append(step_index + s + 1)
+        if test_step['kw']['name'] == 'for循环执行':
+            loop_params = json.loads(test_step['stepParam'])
+            loop_steps['time'] = int(loop_params['loop_time'])
+            l_index = int(loop_params['step_index'])
+            loop_steps['steps'] = test_steps[step_index + 1: l_index + 1]
+        case_result = log_dict['result']
+        log_text.append(log_dict)
+        return case_result, log_text, pass_steps, loop_steps
+    except Exception as e:
+        log_dict['logDetail'] = [{'title': '错误信息', 'time': f'{datetime.datetime.now()}',
+                                  'content': traceback.format_exc()}]
+        log_dict['result'] = 'error'
+        case_result = 'error'
+        log_text.append(log_dict)
+        logger.error("步骤执行异常: %s", e)
+        return case_result, log_text, pass_steps, loop_steps
 
 
 def run_task(robot_id: int):
@@ -130,12 +137,13 @@ def run_task(robot_id: int):
                             loop_steps = {'time': 0, 'steps': []}
                         if break_loop:
                             break
-                        case_result, log_text, pass_steps, loop_steps = execute_step(test_step=testStep,
-                                                                                     test_steps=test_steps,
-                                                                                     pass_steps=pass_steps,
-                                                                                     loop_steps=loop_steps,
-                                                                                     step_index=step_index,
-                                                                                     log_text=log_text)
+                        if testStep['enabled']:
+                            case_result, log_text, pass_steps, loop_steps = execute_step(test_step=testStep,
+                                                                                         test_steps=test_steps,
+                                                                                         pass_steps=pass_steps,
+                                                                                         loop_steps=loop_steps,
+                                                                                         step_index=step_index,
+                                                                                         log_text=log_text)
                         if case_result != 'pass':
                             break
                         step_index += 1
@@ -151,11 +159,12 @@ def run_task(robot_id: int):
             if stop == 0:
                 task_complete(task)
         except Exception as e:
-            logger.error("任务执行异常: %s", e)
+            logger.error("任务执行异常: %s", traceback.format_exc())
 
 
 def task_complete(task):
     driver.close_browser()
+    android_client.destroy_client()
     db_class.close_conn()
     StopTask.delete_all()
     Task.delete(task)

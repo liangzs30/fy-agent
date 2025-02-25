@@ -86,7 +86,7 @@ def keyword(name: str, param_conf: dict):
                 result = 'error'
                 log_detail.append(
                     {'title': '错误信息', 'time': f'{datetime.datetime.now()}', 'content': traceback.format_exc()})
-                if 'Browser' in str(func):
+                if 'Browser' in str(func) or 'Playwright' in str(func):
                     im = args[0].capture_screenshot()
                     screen_shot = f'/{time.strftime("%Y%m%d", time.localtime())}/{im.file_name}'
             end_time = time.time()

@@ -1,6 +1,7 @@
 import datetime
 import json
 import os
+import socket
 import time
 from functools import partial
 import traceback
@@ -13,10 +14,12 @@ from np.kw.web.web import Browser
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
+from np.kw.web.web_playwright import Playwright
 from tools.http_client import HttpUtil
 from tools.log_util import calc_time, LogUtil
 
 driver = Browser()
+playw = Playwright()
 android_client = AndroidApp()
 db_class = MysqlClient()
 step_class = {
@@ -24,7 +27,8 @@ step_class = {
     'Common': Common(),
     'Browser': driver,
     'AndroidApp': android_client,
-    'MysqlClient': db_class
+    'MysqlClient': db_class,
+    "Playwright": playw
 }
 logger = LogUtil().logger
 http_util = HttpUtil()
@@ -88,7 +92,10 @@ def run_task(robot_id: int):
             task = Task(task_id=tasks[0]['id'], name=tasks[0]['name'], env=tasks[0]['runEnv'], test_cases=test_cases,
                         start_time=tasks[0]['startTime'], end_time='', project_id=tasks[0]['projectID'])
             task.save()
-            http_util.update_task(task_id=task.task_id, status='running', end_time=0)
+            if tasks[0]['runType'] != 'task':
+                http_util.update_task(task_id=task.task_id, status='complete', end_time=0)
+            else:
+                http_util.update_task(task_id=task.task_id, status='running', end_time=0)
             http_util.create_report(task=task)
             Task.update_status(1)
             sys_params = http_util.query_sys_params(tasks[0]['runEnv']['id'])
@@ -164,11 +171,24 @@ def run_task(robot_id: int):
 
 def task_complete(task):
     driver.close_browser()
+    playw.quit_playwright()
     android_client.destroy_client()
     db_class.close_conn()
     StopTask.delete_all()
     Task.delete(task)
     Task.update_status(0)
+
+
+def get_local_ip():
+    try:
+        # 创建一个 UDP 套接字
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))  # 连接到一个外部的 IP 地址
+        local_ip = s.getsockname()[0]  # 获取本地 IP 地址
+        s.close()
+        return local_ip
+    except socket.error:
+        return ""
 
 
 def send_logs_images(robot_id: int):
@@ -196,7 +216,7 @@ def send_logs_images(robot_id: int):
 def main():
     Task.update_status(0)
     CaseLog.clear_case_logs()
-    local_ip = http_util.get_local_ip()
+    local_ip = get_local_ip()
     machine_info = http_util.get_machine_info()
     if machine_info['status'] == 400:
         raise "执行机不存在，请检查uniqueCode"
